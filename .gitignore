@@ -1,0 +1,52 @@
+# Model files (hundreds of MB — users download separately)
+*.gguf
+
+# KV cache files
+*.kvc
+
+# Build artifacts
+picolm/picolm
+picolm/picolm.exe
+*.o
+*.obj
+*.exe
+*.out
+
+# Claude Code / AI tool config (personal)
+.claude/
+.rightnow/
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Go build (picoclaw)
+picoclaw/picoclaw
+picoclaw/bin/
+
+# Debug & verification scripts (dev-only, not shipped)
+core
+*.dSYM/
+*.bin
+stderr.txt
+stdout.txt
+stderr_test.txt
+verify_*.py
+compare_*.py
+debug_*.py
+check_*.py
+full_forward.py
+
+# PicoClaw is a separate repo (github.com/sipeed/picoclaw)
+picoclaw/
+
+# Internal dev docs
+picoclaw/PICOLM_INTEGRATION.md
