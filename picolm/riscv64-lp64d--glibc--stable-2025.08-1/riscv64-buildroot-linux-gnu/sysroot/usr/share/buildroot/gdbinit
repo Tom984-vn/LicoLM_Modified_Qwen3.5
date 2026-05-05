@@ -1,0 +1,2 @@
+add-auto-load-safe-path /builds/buildroot.org/toolchains-builder/build/riscv64-lp64d--glibc--stable-2025.08-1/riscv64-buildroot-linux-gnu/sysroot
+set sysroot /builds/buildroot.org/toolchains-builder/build/riscv64-lp64d--glibc--stable-2025.08-1/riscv64-buildroot-linux-gnu/sysroot

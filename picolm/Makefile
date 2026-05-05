@@ -7,6 +7,9 @@ TARGET  = picolm
 PREFIX  ?= /usr/local
 MODEL_DIR ?= /opt/picolm/models
 
+TOOLCHAIN_DIR = riscv64-lp64d--glibc--stable-2025.08-1
+TOOLCHAIN_PATH = $(shell pwd)/$(TOOLCHAIN_DIR)
+
 # --- Native build (auto-detect CPU, enables SSE2/AVX on x86) ---
 native: CFLAGS += -march=native
 native: $(TARGET)
@@ -39,11 +42,12 @@ riscv: CC = riscv64-linux-gnu-gcc
 riscv: CFLAGS += -march=rv64gc -mabi=lp64d
 riscv: $(TARGET)
 
-# --- Cross-compile for RISC-V from platforms (e.g. x86) ---
-cross-riscv: CC = riscv64-linux-gnu-gcc
-cross-riscv: CFLAGS += -march=rv64gc -mabi=lp64d
-cross-riscv: LDFLAGS += -static
-cross-riscv: $(TARGET)
+#---- modified cross compiler
+riscv-mod: CC = $(TOOLCHAIN_PATH)/bin/riscv64-linux-gcc
+# --sysroot tells the compiler to use the headers inside the Bootlin folder
+riscv-mod: CFLAGS += -march=rv64gc -mabi=lp64d --sysroot=$(TOOLCHAIN_PATH)/riscv64-buildroot-linux-gnu/sysroot -static
+riscv-mod: LDFLAGS += -static
+riscv-mod: $(TARGET)
 
 # --- Debug build ---
 debug: CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -g -O0
@@ -67,6 +71,15 @@ model:
 		echo "Model already exists at $(MODEL_DIR)/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"; \
 	fi
 
+model_update:
+	@mkdir -p $(MODEL_DIR)
+	@if [ ! -f "$(MODEL_DIR)/Qwen3.5-0.8B.Q4_K_M.gguf" ]; then \
+                echo "Downloading Qwen 3.5 - 0.8B..."; \
+                curl -L -o "$(MODEL_DIR)/Qwen3.5-0.8B.Q4_K_M.gguf" \
+		"https://huggingface.co/Jackrong/Qwen3.5-0.8B-Claude-4.6-Opus-Reasoning-Distilled-GGUF/resolve/main/Qwen3.5-0.8B.Q4_K_M.gguf" && echo "Done."; \
+        else \
+                echo "Model already exists at $(MODEL_DIR)/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"; \
+        fi
 clean:
 	rm -f $(TARGET) $(TARGET).exe *.obj *.o
 

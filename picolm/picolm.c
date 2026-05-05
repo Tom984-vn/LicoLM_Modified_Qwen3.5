@@ -61,6 +61,23 @@ static char *read_stdin(void) {
     return buf;
 }
 
+void print_available_ram(){
+    FILE *file = fopen("/proc/meminfo", "r");
+    if (file){
+        char line[256];
+        long mem_avail = 0;
+        while (fgets(line, sizeof(line), file)){
+            if (strncmp(line, "MemAvailable:", 13) == 0){
+                sscanf(line, "MemAvailable: %ld kB", &mem_avail);
+                break;
+            }
+        }
+        fclose(file);
+
+        printf("RAM Available: %ld MB", mem_avail / 1024);
+    }
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         usage(argv[0]);
@@ -222,6 +239,13 @@ int main(int argc, char **argv) {
             /* Decode and print */
             const char *piece = tokenizer_decode(&tokenizer, token, next);
             printf("%s", piece);
+
+            /* Print available ram*/
+            printf("\033[s");
+            printf("\n\033[K");
+            print_available_ram();
+            printf("\033[u");
+
             fflush(stdout);
 
             total_gen++;
@@ -234,7 +258,7 @@ int main(int argc, char **argv) {
         token = next;
     }
 
-    printf("\n");
+    printf("\n\n\n");
     double t_end = get_time_ms();
 
     /* Save KV cache if requested (save the full prompt state) */

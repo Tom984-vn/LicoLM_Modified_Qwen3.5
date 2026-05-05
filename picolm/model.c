@@ -227,24 +227,24 @@ static int parse_gguf(model_t *m, int max_seq_len) {
     cfg->weight_type = GGUF_TYPE_F16;
     m->tok_bos_id = 1;
     m->tok_eos_id = 2;
-
+    // Read the metadata (n_metadata = kv count)
     for (uint64_t i = 0; i < n_metadata; i++) {
         gguf_str_t key = read_gguf_string(&r);
         uint32_t vtype = read_u32(&r);
 
-        if (str_eq(key, "llama.embedding_length") || str_eq(key, "general.embedding_length")) {
+        if (str_eq(key, "qwen35.embedding_length") || str_eq(key, "general.embedding_length")) {
             int dummy; cfg->n_embd = (int)skip_meta_value(&r, vtype, &dummy);
-        } else if (str_eq(key, "llama.feed_forward_length") || str_eq(key, "general.feed_forward_length")) {
+        } else if (str_eq(key, "qwen35.feed_forward_length") || str_eq(key, "general.feed_forward_length")) {
             int dummy; cfg->n_ffn = (int)skip_meta_value(&r, vtype, &dummy);
-        } else if (str_eq(key, "llama.attention.head_count")) {
+        } else if (str_eq(key, "qwen35.attention.head_count")) {
             int dummy; cfg->n_heads = (int)skip_meta_value(&r, vtype, &dummy);
-        } else if (str_eq(key, "llama.attention.head_count_kv")) {
+        } else if (str_eq(key, "qwen35.attention.head_count_kv")) {
             int dummy; cfg->n_kv_heads = (int)skip_meta_value(&r, vtype, &dummy);
-        } else if (str_eq(key, "llama.block_count")) {
+        } else if (str_eq(key, "qwen35.block_count")) {
             int dummy; cfg->n_layers = (int)skip_meta_value(&r, vtype, &dummy);
-        } else if (str_eq(key, "llama.context_length")) {
+        } else if (str_eq(key, "qwen35.context_length")) {
             int dummy; cfg->max_seq_len = (int)skip_meta_value(&r, vtype, &dummy);
-        } else if (str_eq(key, "llama.rope.freq_base")) {
+        } else if (str_eq(key, "qwen35.rope.freq_base")) {
             if (vtype == GGUF_META_FLOAT32) {
                 cfg->rope_freq_base = read_f32(&r);
             } else {
@@ -252,7 +252,7 @@ static int parse_gguf(model_t *m, int max_seq_len) {
             }
         } else if (str_eq(key, "general.alignment")) {
             int dummy; cfg->alignment = (int)skip_meta_value(&r, vtype, &dummy);
-        } else if (str_eq(key, "llama.vocab_size")) {
+        } else if (str_eq(key, "qwen35.vocab_size")) {
             int dummy; cfg->vocab_size = (int)skip_meta_value(&r, vtype, &dummy);
         } else if (str_eq(key, "tokenizer.ggml.bos_token_id")) {
             int dummy; m->tok_bos_id = (uint32_t)skip_meta_value(&r, vtype, &dummy);
