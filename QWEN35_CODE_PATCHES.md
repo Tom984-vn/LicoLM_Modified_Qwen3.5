@@ -1,12 +1,10 @@
-# Qwen 3.5 Code Implementation - Ready-to-Use Patches
+# Qwen 3.5 Code Implementation
 
 This file contains copy-paste-ready code blocks to integrate Qwen 3.5 support into PicoLM.
 
 ## File 1: model.c - Enhanced Metadata Parsing
 
 ### Patch 1a: Improve parse_gguf() metadata keys (around line 235-260)
-
-Replace the existing metadata parsing section with:
 
 ```c
 // ---- Enhanced metadata parsing with Qwen 3.5 support ----
