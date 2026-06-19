@@ -36,7 +36,7 @@ static void usage(const char *prog) {
     fprintf(stderr, "  -k <float>     Top-p / nucleus sampling (default: 0.9)\n");
     fprintf(stderr, "  -s <int>       RNG seed (default: 42)\n");
     fprintf(stderr, "  -c <int>       Context length override\n");
-    fprintf(stderr, "  -j <int>       Number of threads (default: 4)\n");
+    fprintf(stderr, "  -j <int>       Number of threads (default: 2 for RISC-V)\n");
     fprintf(stderr, "\nAdvanced options:\n");
     fprintf(stderr, "  --json         Grammar-constrained JSON output mode\n");
     fprintf(stderr, "  --cache <file> KV cache file (saves/loads prompt state)\n");
@@ -61,23 +61,6 @@ static char *read_stdin(void) {
     return buf;
 }
 
-void print_available_ram(){
-    FILE *file = fopen("/proc/meminfo", "r");
-    if (file){
-        char line[256];
-        long mem_avail = 0;
-        while (fgets(line, sizeof(line), file)){
-            if (strncmp(line, "MemAvailable:", 13) == 0){
-                sscanf(line, "MemAvailable: %ld kB", &mem_avail);
-                break;
-            }
-        }
-        fclose(file);
-
-        printf("RAM Available: %ld MB", mem_avail / 1024);
-    }
-}
-
 int main(int argc, char **argv) {
     if (argc < 2) {
         usage(argv[0]);
@@ -91,7 +74,7 @@ int main(int argc, char **argv) {
     float  top_p = 0.9f;
     uint64_t seed = 42;
     int    context_override = 0;
-    int    num_threads = 4;
+    int    num_threads = 2;  /* CHANGED: Default to 2 for LicheeRV Nano (2 cores) */
     int    json_mode = 0;
     const char *cache_file = NULL;
 
@@ -239,13 +222,6 @@ int main(int argc, char **argv) {
             /* Decode and print */
             const char *piece = tokenizer_decode(&tokenizer, token, next);
             printf("%s", piece);
-
-            /* Print available ram*/
-            printf("\033[s");
-            printf("\n\033[K");
-            print_available_ram();
-            printf("\033[u");
-
             fflush(stdout);
 
             total_gen++;
@@ -258,7 +234,7 @@ int main(int argc, char **argv) {
         token = next;
     }
 
-    printf("\n\n\n");
+    printf("\n\n");
     double t_end = get_time_ms();
 
     /* Save KV cache if requested (save the full prompt state) */
