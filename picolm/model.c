@@ -242,8 +242,6 @@ static int parse_gguf(model_t *m, int max_seq_len) {
             int dummy; cfg->n_kv_heads = (int)skip_meta_value(&r, vtype, &dummy);
         } else if (str_eq(key, "qwen35.block_count")) {
             int dummy; cfg->n_layers = (int)skip_meta_value(&r, vtype, &dummy);
-        } else if (str_eq(key, "qwen35.context_length")) {
-            int dummy; cfg->max_seq_len = (int)skip_meta_value(&r, vtype, &dummy);
         } else if (str_eq(key, "qwen35.rope.freq_base")) {
             if (vtype == GGUF_META_FLOAT32) {
                 cfg->rope_freq_base = read_f32(&r);
@@ -282,6 +280,12 @@ static int parse_gguf(model_t *m, int max_seq_len) {
                 m->tok_n_scores = arr_len;
                 r.pos += arr_len * 4;
             }
+        } else if (str_eq(key, "qwen35.ssm.conv_kernel")) {
+            int dummy; /* If your model_config_t gets updated, store here */ skip_meta_value(&r, vtype, &dummy);
+        } else if (str_eq(key, "qwen35.ssm.state_size")) {
+            int dummy; skip_meta_value(&r, vtype, &dummy);
+        } else if (str_eq(key, "qwen35.ssm.inner_size")) {
+            int dummy; skip_meta_value(&r, vtype, &dummy);
         } else {
             int dummy; skip_meta_value(&r, vtype, &dummy);
         }
@@ -354,16 +358,32 @@ static int parse_gguf(model_t *m, int max_seq_len) {
 
             if (layer >= 0 && layer < MAX_LAYERS) {
                 layer_weights_t *lw = &w->layers[layer];
+                
+                // ---- Attention Mechanism ----
                 if (strcmp(suffix, "attn_norm.weight") == 0) {
                     lw->attn_norm = ptr; lw->type_attn_norm = qtype;
-                } else if (strcmp(suffix, "attn_q.weight") == 0) {
-                    lw->attn_q = ptr; lw->type_attn_q = qtype;
-                } else if (strcmp(suffix, "attn_k.weight") == 0) {
-                    lw->attn_k = ptr; lw->type_attn_k = qtype;
-                } else if (strcmp(suffix, "attn_v.weight") == 0) {
-                    lw->attn_v = ptr; lw->type_attn_v = qtype;
-                } else if (strcmp(suffix, "attn_output.weight") == 0) {
-                    lw->attn_output = ptr; lw->type_attn_output = qtype;
+                } else if (strcmp(suffix, "attn_qkv.weight") == 0) {
+                    lw->attn_qkv = ptr; lw->type_attn_qkv = qtype;  /* Combined QKV */
+                } else if (strcmp(suffix, "attn_gate.weight") == 0) {
+                    lw->attn_gate = ptr; lw->type_attn_gate = qtype;
+                    
+                // ---- SSM / Mamba Mechanism ----
+                } else if (strcmp(suffix, "ssm_norm.weight") == 0) {
+                    lw->ssm_norm = ptr; lw->type_ssm_norm = qtype;
+                } else if (strcmp(suffix, "ssm_a") == 0) {
+                    lw->ssm_a = ptr; lw->type_ssm_a = qtype;
+                } else if (strcmp(suffix, "ssm_alpha.weight") == 0) {
+                    lw->ssm_alpha = ptr; lw->type_ssm_alpha = qtype;
+                } else if (strcmp(suffix, "ssm_beta.weight") == 0) {
+                    lw->ssm_beta = ptr; lw->type_ssm_beta = qtype;
+                } else if (strcmp(suffix, "ssm_conv1d.weight") == 0) {
+                    lw->ssm_conv1d = ptr; lw->type_ssm_conv1d = qtype;
+                } else if (strcmp(suffix, "ssm_dt.bias") == 0) {
+                    lw->ssm_dt_bias = ptr; lw->type_ssm_dt_bias = qtype;
+                } else if (strcmp(suffix, "ssm_out.weight") == 0) {
+                    lw->ssm_out = ptr; lw->type_ssm_out = qtype;
+                    
+                // ---- Feed-Forward Network & Normalization ----
                 } else if (strcmp(suffix, "ffn_norm.weight") == 0) {
                     lw->ffn_norm = ptr; lw->type_ffn_norm = qtype;
                 } else if (strcmp(suffix, "ffn_gate.weight") == 0) {
@@ -372,6 +392,8 @@ static int parse_gguf(model_t *m, int max_seq_len) {
                     lw->ffn_down = ptr; lw->type_ffn_down = qtype;
                 } else if (strcmp(suffix, "ffn_up.weight") == 0) {
                     lw->ffn_up = ptr; lw->type_ffn_up = qtype;
+                } else if (strcmp(suffix, "post_attention_norm.weight") == 0) {
+                    lw->post_attention_norm = ptr; lw->type_post_attention_norm = qtype;
                 }
             }
         }
@@ -398,7 +420,8 @@ static int parse_gguf(model_t *m, int max_seq_len) {
         cfg->vocab_size = (int)m->tok_n_tokens;
     }
 
-    cfg->weight_type = w->layers[0].type_attn_q;
+    // FIX: Change type_attn_q to type_attn_qkv
+    cfg->weight_type = w->layers[0].type_attn_qkv;
 
     fprintf(stderr, "Model config:\n");
     fprintf(stderr, "  n_embd=%d, n_ffn=%d, n_heads=%d, n_kv_heads=%d\n",
@@ -446,6 +469,7 @@ static int allocate_run_state(model_t *m) {
     size_t sz_logits = (size_t)c->vocab_size * sizeof(float);
 
     int scratch_dim = c->n_embd > c->n_ffn ? c->n_embd : c->n_ffn;
+    
     if (c->vocab_size > scratch_dim) scratch_dim = c->vocab_size;
     size_t sz_scratch = (size_t)scratch_dim * sizeof(float);
 
@@ -456,9 +480,22 @@ static int allocate_run_state(model_t *m) {
     size_t n_norm = (size_t)(c->n_layers * 2 + 1) * c->n_embd;
     size_t sz_norm = n_norm * sizeof(float);
 
+    int ssm_inner_dim = c->n_embd * 2; 
+    int ssm_state_size = 16;
+    int ssm_conv_kernel = 4;
+
+    size_t sz_ssm_state = (size_t)c->n_layers * ssm_inner_dim * ssm_state_size * sizeof(float);
+    size_t sz_ssm_conv  = (size_t)c->n_layers * ssm_inner_dim * ssm_conv_kernel * sizeof(float);
+
+    // Add these sizes to your total calculation
     size_t total = sz_x + sz_xb + sz_xb2 + sz_q +
                    sz_hb + sz_hb2 + sz_logits +
-                   sz_scratch + sz_rope + sz_norm;
+                   sz_scratch + sz_rope + sz_norm + 
+                   sz_ssm_state + sz_ssm_conv; // <-- Added
+
+    // size_t total = sz_x + sz_xb + sz_xb2 + sz_q +
+    //                sz_hb + sz_hb2 + sz_logits +
+    //                sz_scratch + sz_rope + sz_norm;
 
     /* FP16 KV cache: separate allocation */
     size_t kv_elements = (size_t)c->n_layers * c->max_seq_len * kv_dim;
@@ -483,7 +520,6 @@ static int allocate_run_state(model_t *m) {
         return -1;
     }
     s->kv_size = sz_kv;
-
     /* Carve float pointers */
     float *p = (float *)s->mem_block;
     s->x      = p; p += c->n_embd;
@@ -494,41 +530,61 @@ static int allocate_run_state(model_t *m) {
     s->hb2    = p; p += c->n_ffn;
     s->logits = p; p += c->vocab_size;
     s->dequant_scratch = p; p += scratch_dim;
-
+    
     /* RoPE tables */
     s->rope_cos = p; p += (size_t)c->max_seq_len * half_dim;
     s->rope_sin = p; p += (size_t)c->max_seq_len * half_dim;
-
+    
     /* Norm weights */
     s->norm_weights = p;
-
+    
     /* FP16 KV cache pointers */
     uint16_t *kp = (uint16_t *)s->kv_block;
     s->key_cache = kp; kp += kv_elements;
     s->val_cache = kp;
-
+     printf("Checkpoint0\n");
     /* Pre-dequantize norm weights */
     float *nw = s->norm_weights;
     for (int l = 0; l < c->n_layers; l++) {
+        printf("Dequantizing norm weights for layer %d\n", l);
         s->attn_norm_w[l] = nw;
         dequantize_row(m->weights.layers[l].attn_norm, nw, c->n_embd,
-                       m->weights.layers[l].type_attn_norm);
+            m->weights.layers[l].type_attn_norm);
+        printf("Dequantizing post_attention_norm weights for layer %d\n", l);
         nw += c->n_embd;
-
-        s->ffn_norm_w[l] = nw;
-        dequantize_row(m->weights.layers[l].ffn_norm, nw, c->n_embd,
-                       m->weights.layers[l].type_ffn_norm);
+        printf("Dequantizing ssm_norm weights for layer %d\n", l); 
+        s->ssm_norm_w[l] = nw;
+        dequantize_row(m->weights.layers[l].ssm_norm, nw, c->n_embd,
+            m->weights.layers[l].type_ssm_norm);
+        nw += c->n_embd;
+        // printf("Dequantizing ffn_norm weights for layer %d\n", l); 
+        // s->ffn_norm_w[l] = nw;
+        // dequantize_row(m->weights.layers[l].ffn_norm, nw, c->n_embd,
+        //     m->weights.layers[l].type_ffn_norm);
         nw += c->n_embd;
     }
+     printf("Checkpoint1\n");
     s->output_norm_w = nw;
-    dequantize_row(m->weights.output_norm, nw, c->n_embd,
-                   m->weights.type_output_norm);
-
+    dequantize_row(m->weights.output_norm, nw, c->n_embd, m->weights.type_output_norm);
+    nw += c->n_embd;
+     
+    /* Allocate the persistent blocks from the tail end of the pointer block */
+    s->ssm_state = (float*)nw; 
+    nw += (c->n_layers * ssm_inner_dim * ssm_state_size);
+    s->conv_state = (float*)nw;
+    nw += (c->n_layers * ssm_inner_dim * ssm_conv_kernel);
+     
+    /* Initialize SSM state buffers to zero */
+    memset(s->ssm_state, 0, (size_t)c->n_layers * ssm_inner_dim * ssm_state_size * sizeof(float));
+    memset(s->conv_state, 0, (size_t)c->n_layers * ssm_inner_dim * ssm_conv_kernel * sizeof(float));
+     
     /* Init tensor scratch */
     tensor_init_scratch(s->dequant_scratch, scratch_dim);
 
     /* Pre-compute RoPE tables (eliminates powf/cosf/sinf from hot path) */
     init_rope_tables(s, c);
+    fprintf(stderr, "Pre-computed RoPE tables for %d positions and %d dim pairs\n",
+            c->max_seq_len, half_dim);
 
     return 0;
 }
@@ -551,6 +607,8 @@ int model_load(model_t *m, const char *path, int max_seq_len) {
  *   - Flash attention / online softmax (single pass, no score buffer)
  *   - Pre-computed RoPE tables (table lookup instead of trig)
  * ================================================================ */
+
+// 
 
 float *model_forward(model_t *m, int token, int pos) {
     model_config_t *c = &m->config;
@@ -585,54 +643,39 @@ float *model_forward(model_t *m, int token, int pos) {
         /* ---- Attention ---- */
         rmsnorm(s->xb, s->x, s->attn_norm_w[l], dim);
 
-        /* QKV projections */
-        matmul(s->q, s->xb, lw->attn_q, dim, dim, lw->type_attn_q);
+        /* * FIX: Qwen3.5 uses a combined QKV weight block.
+         * The total output dimension is: dim (for Q) + kv_dim (for K) + kv_dim (for V)
+         */
+        int total_qkv_dim = dim + (2 * kv_dim);
+        
+        // Compute all projections directly into our dequant_scratch buffer
+        matmul(s->dequant_scratch, s->xb, lw->attn_qkv, dim, total_qkv_dim, lw->type_attn_qkv);
 
-        /* K and V: project into float temp, then store as FP16 in cache */
-        float *k_tmp = s->xb2; /* reuse xb2 as temp for K (kv_dim <= dim) */
-        matmul(k_tmp, s->xb, lw->attn_k, dim, kv_dim, lw->type_attn_k);
+        // Slice out temporary floating point pointers from our scratch space layout
+        float *q_src = s->dequant_scratch;
+        float *k_src = s->dequant_scratch + dim;
+        float *v_src = s->dequant_scratch + dim + kv_dim;
 
-        /* Store K as FP16 */
+        // Copy Q directly to its runtime location
+        memcpy(s->q, q_src, dim * sizeof(float));
+
+        /* Key and Value Cache Calculations */
         uint16_t *kcache_layer = s->key_cache + (size_t)l * seq_len * kv_dim;
         uint16_t *vcache_layer = s->val_cache + (size_t)l * seq_len * kv_dim;
+        
         uint16_t *key_pos_fp16 = kcache_layer + (size_t)pos * kv_dim;
-
-        /* Apply RoPE to Q and K (using pre-computed tables) */
-        rope(s->q, k_tmp, head_dim, n_heads, n_kv_heads, cos_pos, sin_pos);
-
-        /* Convert K to FP16 and store */
-        for (int d = 0; d < kv_dim; d++) {
-            key_pos_fp16[d] = fp32_to_fp16(k_tmp[d]);
-        }
-
-        /* V projection -> store directly as FP16 */
-        float *v_tmp = s->xb2;
-        matmul(v_tmp, s->xb, lw->attn_v, dim, kv_dim, lw->type_attn_v);
         uint16_t *val_pos_fp16 = vcache_layer + (size_t)pos * kv_dim;
+
+        /* Apply RoPE to Q and our sliced K buffer */
+        rope(s->q, k_src, head_dim, n_heads, n_kv_heads, cos_pos, sin_pos);
+
+        /* Quantize and compress K & V slices to FP16 Cache Blocks */
         for (int d = 0; d < kv_dim; d++) {
-            val_pos_fp16[d] = fp32_to_fp16(v_tmp[d]);
+            key_pos_fp16[d] = fp32_to_fp16(k_src[d]);
+            val_pos_fp16[d] = fp32_to_fp16(v_src[d]);
         }
 
-        /* ---- Flash Attention (online softmax) ----
-         *
-         * Instead of materializing the full [n_heads * seq_len] score array,
-         * compute attention in a single pass using the online softmax trick:
-         *
-         *   max_s = -inf, sum_exp = 0, acc[d] = 0
-         *   for each cached position t:
-         *     s = dot(Q_h, K_t) / sqrt(d)
-         *     if s > max_s:
-         *       correction = exp(max_s - s)
-         *       acc *= correction, sum_exp *= correction
-         *       sum_exp += 1, acc += V_t
-         *       max_s = s
-         *     else:
-         *       w = exp(s - max_s)
-         *       sum_exp += w, acc += w * V_t
-         *   result = acc / sum_exp
-         *
-         * This saves memory (no att[] buffer) and is more cache-friendly.
-         */
+        /* ---- Flash Attention (online softmax) ---- */
         for (int h = 0; h < n_heads; h++) {
             float *qh = s->q + h * head_dim;
             int kv_h = h / kv_mul;
@@ -640,12 +683,10 @@ float *model_forward(model_t *m, int token, int pos) {
 
             float max_score = -1e30f;
             float sum_exp = 0.0f;
-            /* Accumulator for weighted V values */
-            float acc[256]; /* head_dim is typically 64-128 */
+            float acc[256]; 
             memset(acc, 0, (size_t)head_dim * sizeof(float));
 
             for (int t = 0; t <= pos; t++) {
-                /* Compute score: dot(Q_h, K_t) / sqrt(head_dim) */
                 const uint16_t *kt = kcache_layer + (size_t)t * kv_dim + kv_h * head_dim;
                 float score = 0.0f;
                 for (int d = 0; d < head_dim; d++) {
@@ -653,7 +694,6 @@ float *model_forward(model_t *m, int token, int pos) {
                 }
                 score /= sqrtf((float)head_dim);
 
-                /* Online softmax update */
                 const uint16_t *vt = vcache_layer + (size_t)t * kv_dim + kv_h * head_dim;
 
                 if (score > max_score) {
@@ -672,16 +712,57 @@ float *model_forward(model_t *m, int token, int pos) {
                 }
             }
 
-            /* Normalize */
             float inv_sum = 1.0f / sum_exp;
             for (int d = 0; d < head_dim; d++) {
                 xbh[d] = acc[d] * inv_sum;
             }
         }
 
-        /* Output projection */
-        matmul(s->xb2, s->xb, lw->attn_output, dim, dim, lw->type_attn_output);
+        /* Attention Output Projection Step */
+        // Note: Qwen models use attn_gate instead of traditional output projections 
+        /* Attention Output Projection Step */
+        matmul(s->xb2, s->xb, lw->attn_gate, dim, dim, lw->type_attn_gate);
         vec_add(s->x, s->xb2, dim);
+
+        // ================================================================
+        // CHÈN THÊM: KHỐI TÍNH TOÁN SSM / MAMBA PIPELINE TẠI ĐÂY
+        // ================================================================
+        if (lw->ssm_norm != NULL) {
+            int ssm_inner_dim = dim * 2;
+            int ssm_state_size = 16;
+            int ssm_conv_kernel = 4;
+            
+            // 1. Chuẩn hóa RMSNorm trước khi vào SSM
+            rmsnorm(s->xb, s->x, s->ssm_norm_w[l], dim);
+            
+            // 2. Dự chiếu trạng thái (Sử dụng tạm vùng nhớ hb và hb2 làm scratchpad)
+            // Dự chiếu ssm_alpha và ssm_beta từ xb
+            matmul(s->hb,  s->xb, lw->ssm_alpha, dim, ssm_inner_dim, lw->type_ssm_alpha);
+            matmul(s->hb2, s->xb, lw->ssm_beta,  dim, ssm_inner_dim, lw->type_ssm_beta);
+            
+            // 3. Cập nhật trạng thái Convolution 1D & Tích lũy State Space
+            // Khối này dịch chuyển cửa sổ conv_state và nhân với trọng số ssm_conv1d
+            // Do ssm_a lưu ở dạng F32, ta tính toán trực tiếp không qua dequantize
+            float *layer_ssm_state = s->ssm_state + (size_t)l * ssm_inner_dim * ssm_state_size;
+            float *layer_conv_state = s->conv_state + (size_t)l * ssm_inner_dim * ssm_conv_kernel;
+            
+            // Gọi hàm xử lý lõi toán học SSM (hoặc viết vòng lặp tích lũy trạng thái tuyến tính)
+            // Ở mức đơn giản nhất để test mạch dữ liệu, ta cập nhật trạng thái lịch sử:
+            for (int i = 0; i < ssm_inner_dim; i++) {
+                float dt = s->hb[i] + ((float*)lw->ssm_dt_bias)[i % 16]; // dt_bias cũng là F32
+                float a_val = ((float*)lw->ssm_a)[i];                  // ssm_a là F32
+                
+                // Công thức tính toán dịch chuyển trạng thái Mamba: X_t = A * X_{t-1} + B * U_t
+                layer_ssm_state[i * ssm_state_size] = layer_ssm_state[i * ssm_state_size] * expf(dt * a_val) + dt * s->hb2[i];
+            }
+            
+            // 4. Nhân với ma trận đầu ra ssm_out đưa về kích thước gốc (dim)
+            matmul(s->xb2, s->hb, lw->ssm_out, ssm_inner_dim, dim, lw->type_ssm_out);
+            
+            // 5. Cộng trực tiếp vào đường truyền tắt (Residual Connection)
+            vec_add(s->x, s->xb2, dim);
+        }
+        // ================================================================
 
         /* ---- FFN (SwiGLU) ---- */
         rmsnorm(s->xb, s->x, s->ffn_norm_w[l], dim);

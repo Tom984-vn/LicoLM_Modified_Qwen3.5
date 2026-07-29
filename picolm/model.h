@@ -30,25 +30,45 @@ typedef struct {
 /* ---- Per-layer weight pointers (into mmap) ---- */
 
 typedef struct {
+    // ---- Attention Layer ----
     const void *attn_norm;
-    const void *attn_q;
-    const void *attn_k;
-    const void *attn_v;
-    const void *attn_output;
-    const void *ffn_norm;
+    const void *attn_qkv;       /* Packed Q, K, and V matrices */
+    const void *attn_gate;      /* Found in your GGUF list */
+    
+    // ---- SSM / Mamba Layer (New additions) ----
+    const void *ssm_norm;
+    const void *ssm_a;
+    const void *ssm_alpha;
+    const void *ssm_beta;
+    const void *ssm_conv1d;
+    const void *ssm_dt;
+    const void *ssm_out;
+
+    // ---- Feed Forward Layer ----
+    // const void *ffn_norm;
     const void *ffn_gate;
     const void *ffn_down;
     const void *ffn_up;
-    /* Per-tensor quantization types */
+    const void *post_attention_norm; /* Found in your GGUF list */
+
+    // ---- Quantization Type Mapping ----
     gguf_type_t type_attn_norm;
-    gguf_type_t type_attn_q;
-    gguf_type_t type_attn_k;
-    gguf_type_t type_attn_v;
-    gguf_type_t type_attn_output;
-    gguf_type_t type_ffn_norm;
+    gguf_type_t type_attn_qkv;
+    gguf_type_t type_attn_gate;
+    
+    gguf_type_t type_ssm_norm;
+    gguf_type_t type_ssm_a;
+    gguf_type_t type_ssm_alpha;
+    gguf_type_t type_ssm_beta;
+    gguf_type_t type_ssm_conv1d;
+    gguf_type_t type_ssm_dt;
+    gguf_type_t type_ssm_out;
+
+    // gguf_type_t type_ffn_norm;
     gguf_type_t type_ffn_gate;
     gguf_type_t type_ffn_down;
     gguf_type_t type_ffn_up;
+    gguf_type_t type_post_attention_norm;
 } layer_weights_t;
 
 typedef struct {
@@ -87,7 +107,10 @@ typedef struct {
     float *norm_weights;
     float *attn_norm_w[MAX_LAYERS];
     float *ffn_norm_w[MAX_LAYERS];
+    float *ssm_norm_w[MAX_LAYERS];
     float *output_norm_w;
+    float *ssm_state;       /* Pointer to the persistent SSM state buffer */
+    float *conv_state;      /* Pointer to the persistent SSM convolution buffer */
 
     /* Single allocation base */
     void *mem_block;

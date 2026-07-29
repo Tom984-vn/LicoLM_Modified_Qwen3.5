@@ -28,7 +28,7 @@ static double get_time_ms(void) {
 
 static void usage(const char *prog) {
     fprintf(stderr, "PicoLLM — ultra-lightweight LLM inference engine\n\n");
-    fprintf(stderr, "Usage: %s <model.gguf> [options]\n", prog);
+    fprintf(stderr, "Usage: %s <Qwen3.5-0.8B.Q4_K_M.gguf> [options]\n", prog);
     fprintf(stderr, "\nGeneration options:\n");
     fprintf(stderr, "  -p <prompt>    Input prompt (or pipe via stdin)\n");
     fprintf(stderr, "  -n <int>       Max tokens to generate (default: 256)\n");
