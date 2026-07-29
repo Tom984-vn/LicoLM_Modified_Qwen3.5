@@ -106,7 +106,7 @@ typedef struct {
     /* Pre-dequantized norm weights (small, keep in RAM) */
     float *norm_weights;
     float *attn_norm_w[MAX_LAYERS];
-    float *ffn_norm_w[MAX_LAYERS];
+    float *post_attn_norm_w[MAX_LAYERS];
     float *ssm_norm_w[MAX_LAYERS];
     float *output_norm_w;
     float *ssm_state;       /* Pointer to the persistent SSM state buffer */

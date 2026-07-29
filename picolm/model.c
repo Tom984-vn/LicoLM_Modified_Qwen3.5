@@ -476,8 +476,8 @@ static int allocate_run_state(model_t *m) {
     /* RoPE tables: cos and sin for each (position, dim_pair) */
     size_t sz_rope = (size_t)c->max_seq_len * half_dim * sizeof(float) * 2;
 
-    /* Norm weights: (n_layers * 2 + 1) * n_embd floats */
-    size_t n_norm = (size_t)(c->n_layers * 2 + 1) * c->n_embd;
+    /* Norm weights: (n_layers * 3 + 1) * n_embd floats */
+    size_t n_norm = (size_t)(c->n_layers * 3 + 1) * c->n_embd;
     size_t sz_norm = n_norm * sizeof(float);
 
     int ssm_inner_dim = c->n_embd * 2; 
@@ -546,21 +546,30 @@ static int allocate_run_state(model_t *m) {
     /* Pre-dequantize norm weights */
     float *nw = s->norm_weights;
     for (int l = 0; l < c->n_layers; l++) {
+        // attn_norm
         printf("Dequantizing norm weights for layer %d\n", l);
         s->attn_norm_w[l] = nw;
         dequantize_row(m->weights.layers[l].attn_norm, nw, c->n_embd,
             m->weights.layers[l].type_attn_norm);
-        printf("Dequantizing post_attention_norm weights for layer %d\n", l);
         nw += c->n_embd;
+
+        // ssm_norm
         printf("Dequantizing ssm_norm weights for layer %d\n", l); 
         s->ssm_norm_w[l] = nw;
         dequantize_row(m->weights.layers[l].ssm_norm, nw, c->n_embd,
             m->weights.layers[l].type_ssm_norm);
         nw += c->n_embd;
+
         // printf("Dequantizing ffn_norm weights for layer %d\n", l); 
         // s->ffn_norm_w[l] = nw;
         // dequantize_row(m->weights.layers[l].ffn_norm, nw, c->n_embd,
         //     m->weights.layers[l].type_ffn_norm);
+
+        // post_attention_norm
+        printf("Dequantizing post_attention_norm weights for layer %d\n", l);
+        s->post_attn_norm_w[l] = nw;
+        dequantize_row(m->weights.layers[l].post_attention_norm, nw, c->n_embd,
+            m->weights.layers[l].type_post_attention_norm);
         nw += c->n_embd;
     }
      printf("Checkpoint1\n");
@@ -765,7 +774,7 @@ float *model_forward(model_t *m, int token, int pos) {
         // ================================================================
 
         /* ---- FFN (SwiGLU) ---- */
-        rmsnorm(s->xb, s->x, s->ffn_norm_w[l], dim);
+        rmsnorm(s->xb, s->x, s->post_attn_norm_w[l], dim);
 
         matmul(s->hb,  s->xb, lw->ffn_gate, dim, n_ffn, lw->type_ffn_gate);
         matmul(s->hb2, s->xb, lw->ffn_up,   dim, n_ffn, lw->type_ffn_up);
