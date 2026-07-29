@@ -379,13 +379,13 @@ static int parse_gguf(model_t *m, int max_seq_len) {
                 } else if (strcmp(suffix, "ssm_conv1d.weight") == 0) {
                     lw->ssm_conv1d = ptr; lw->type_ssm_conv1d = qtype;
                 } else if (strcmp(suffix, "ssm_dt.bias") == 0) {
-                    lw->ssm_dt_bias = ptr; lw->type_ssm_dt_bias = qtype;
+                    lw->ssm_dt = ptr; lw->type_ssm_dt = qtype;
                 } else if (strcmp(suffix, "ssm_out.weight") == 0) {
                     lw->ssm_out = ptr; lw->type_ssm_out = qtype;
                     
                 // ---- Feed-Forward Network & Normalization ----
-                } else if (strcmp(suffix, "ffn_norm.weight") == 0) {
-                    lw->ffn_norm = ptr; lw->type_ffn_norm = qtype;
+                // } else if (strcmp(suffix, "ffn_norm.weight") == 0) {
+                //     lw->ffn_norm = ptr; lw->type_ffn_norm = qtype;
                 } else if (strcmp(suffix, "ffn_gate.weight") == 0) {
                     lw->ffn_gate = ptr; lw->type_ffn_gate = qtype;
                 } else if (strcmp(suffix, "ffn_down.weight") == 0) {
@@ -749,7 +749,7 @@ float *model_forward(model_t *m, int token, int pos) {
             // Gọi hàm xử lý lõi toán học SSM (hoặc viết vòng lặp tích lũy trạng thái tuyến tính)
             // Ở mức đơn giản nhất để test mạch dữ liệu, ta cập nhật trạng thái lịch sử:
             for (int i = 0; i < ssm_inner_dim; i++) {
-                float dt = s->hb[i] + ((float*)lw->ssm_dt_bias)[i % 16]; // dt_bias cũng là F32
+                float dt = s->hb[i] + ((float*)lw->ssm_dt)[i % 16]; // dt_bias cũng là F32
                 float a_val = ((float*)lw->ssm_a)[i];                  // ssm_a là F32
                 
                 // Công thức tính toán dịch chuyển trạng thái Mamba: X_t = A * X_{t-1} + B * U_t
